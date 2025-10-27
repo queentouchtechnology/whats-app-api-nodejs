@@ -125,16 +125,54 @@
 // module.exports = useMongoDBAuthState;
 // src/api/helper/mongoAuthState.js
 const { randomBytes } = require('crypto');
-const { loadBaileys } = require('./baileys-loader'); // ✅ centralized dynamic import
+const { loadBaileys } = require('./baileys-loader'); // ✅ Centralized dynamic import
+const logger = require('pino')();
 
+/**
+ * MongoDB-backed Baileys auth state with ESM-safe dynamic imports
+ */
 async function useMongoDBAuthState(collection) {
   const baileys = await loadBaileys();
-  const { proto, Curve, signedKeyPair, generateRegistrationId } = baileys;
 
+  // 🔍 Try to load required modules from Baileys or submodules
+  let proto = baileys.proto;
+  let Curve = baileys.Curve;
+  let signedKeyPair = baileys.signedKeyPair;
+  let generateRegistrationId = baileys.generateRegistrationId;
+
+  try {
+    // ⛳️ Some builds of Baileys only expose these in submodules
+    if (!proto) {
+      proto = (await import('@whiskeysockets/baileys/WAProto')).proto;
+      logger.info('📦 Loaded proto from WAProto');
+    }
+
+    if (!Curve || !signedKeyPair) {
+      const cryptoUtils = await import('@whiskeysockets/baileys/lib/Utils/crypto');
+      Curve = cryptoUtils.Curve;
+      signedKeyPair = cryptoUtils.signedKeyPair;
+      logger.info('📦 Loaded crypto utils');
+    }
+
+    if (!generateRegistrationId) {
+      const generics = await import('@whiskeysockets/baileys/lib/Utils/generics');
+      generateRegistrationId = generics.generateRegistrationId;
+      logger.info('📦 Loaded generics utils');
+    }
+  } catch (err) {
+    logger.error({ err }, '❌ Failed to import Baileys submodules');
+    throw new Error('Baileys submodules could not be loaded');
+  }
+
+  // ✅ Validate essential exports
   if (!proto || !Curve || !signedKeyPair || !generateRegistrationId) {
+    logger.error('❌ Baileys module missing expected exports');
     throw new Error('Baileys module missing expected exports');
   }
 
+  /**
+   * Generate new authentication credentials
+   */
   const initAuthCreds = () => {
     const identityKey = Curve.generateKeyPair();
     return {
@@ -146,12 +184,13 @@ async function useMongoDBAuthState(collection) {
       processedHistoryMessages: [],
       nextPreKeyId: 1,
       firstUnuploadedPreKeyId: 1,
-      accountSettings: {
-        unarchiveChats: false,
-      },
+      accountSettings: { unarchiveChats: false },
     };
   };
 
+  /**
+   * JSON buffer helpers for MongoDB storage
+   */
   const BufferJSON = {
     replacer: (k, value) => {
       if (
@@ -181,18 +220,20 @@ async function useMongoDBAuthState(collection) {
     },
   };
 
-  const writeData = (data, id) => {
-    return collection.replaceOne(
+  /**
+   * MongoDB data handlers
+   */
+  const writeData = (data, id) =>
+    collection.replaceOne(
       { _id: id },
       JSON.parse(JSON.stringify(data, BufferJSON.replacer)),
       { upsert: true }
     );
-  };
 
   const readData = async (id) => {
     try {
-      const data = JSON.stringify(await collection.findOne({ _id: id }));
-      return JSON.parse(data, BufferJSON.reviver);
+      const data = await collection.findOne({ _id: id });
+      return JSON.parse(JSON.stringify(data), BufferJSON.reviver);
     } catch {
       return null;
     }
@@ -204,8 +245,12 @@ async function useMongoDBAuthState(collection) {
     } catch {}
   };
 
+  // Load or initialize credentials
   const creds = (await readData('creds')) || initAuthCreds();
 
+  /**
+   * Return Baileys-compatible auth state handlers
+   */
   return {
     state: {
       creds,
