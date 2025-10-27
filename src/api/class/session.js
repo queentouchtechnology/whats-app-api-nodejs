@@ -8,7 +8,16 @@ class Session {
         let restoredSessions = new Array()
         let allCollections = []
         try {
-            const db = mongoClient.db('whatsapp-api')
+
+            //const db = mongoClient.db('whatsapp-api')
+
+            const connectToCluster = require('../helper/connectMongoClient');
+const client = global.mongoClient || (global.mongoClient = await connectToCluster(process.env.MONGO_URL));
+const db = client.db('whatsapp-api');
+
+
+            
+
             const result = await db.listCollections().toArray()
             result.forEach((collection) => {
                 allCollections.push(collection.name)

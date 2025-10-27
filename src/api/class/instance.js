@@ -100,7 +100,14 @@ class WhatsAppInstance {
         }
 
         // logger.info(`INSTANCE: init() start for key=${this.key}`)
-        this.collection = mongoClient.db('whatsapp-api').collection(this.key)
+       // this.collection = mongoClient.db('whatsapp-api').collection(this.key)
+
+       const connectToCluster = require('../helper/connectMongoClient');
+const client = global.mongoClient || (global.mongoClient = await connectToCluster(process.env.MONGO_URL));
+this.collection = client.db('whatsapp-api').collection(this.key);
+
+
+
         const { state, saveCreds } = await useMongoDBAuthState(this.collection)
         // logger.info(`AUTH: Loaded MongoDB state for key=${this.key}`)
 
