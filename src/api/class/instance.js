@@ -4,6 +4,11 @@
 const QRCode = require('qrcode')
 const pino = require('pino')
 // NOTE: do NOT require Baileys here (it's ESM). We'll import it dynamically in init().
+
+// Baileys dynamic loader (instead of direct require)
+const { loadBaileys } = require('../helper/baileys-loader');
+
+
 let makeWASocket
 let DisconnectReason
 
@@ -75,7 +80,7 @@ class WhatsAppInstance {
         // ensure Baileys (ESM) is loaded before using it
         if (!makeWASocket) {
             try {
-                const baileys = await import('@whiskeysockets/baileys')
+               const baileys = await loadBaileys();      
                 // baileys may export default or named exports depending on build
                 // prefer default, otherwise try commonly named export
                 makeWASocket =
@@ -87,7 +92,7 @@ class WhatsAppInstance {
                     baileys.DisconnectReason ||
                     baileys.default?.DisconnectReason ||
                     baileys.default?.DisconnectReason
-                logger.info('✅ Baileys module dynamically imported')
+                logger.info('✅ Baileys module loaded via helper')
             } catch (err) {
                 logger.error({ err }, '❌ Failed to import @whiskeysockets/baileys')
                 throw err
