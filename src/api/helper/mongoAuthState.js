@@ -129,7 +129,7 @@ const { loadBaileys } = require('./baileys-loader'); // ✅ Centralized dynamic 
 const logger = require('pino')();
 
 /**
- * MongoDB-backed Baileys auth state with ESM-safe dynamic imports
+ * MongoDB-backed Baileys auth state with full Vercel + ESM compatibility
  */
 async function useMongoDBAuthState(collection) {
   const baileys = await loadBaileys();
@@ -141,21 +141,22 @@ async function useMongoDBAuthState(collection) {
   let generateRegistrationId = baileys.generateRegistrationId;
 
   try {
-    // ⛳️ Some builds of Baileys only expose these in submodules
+    // 🧩 Explicit import fix for Vercel: must include `/index.js`
     if (!proto) {
-      proto = (await import('@whiskeysockets/baileys/WAProto')).proto;
-      logger.info('📦 Loaded proto from WAProto');
+      const waProtoImport = await import('@whiskeysockets/baileys/WAProto/index.js');
+      proto = waProtoImport.proto;
+      logger.info('📦 Loaded proto from WAProto/index.js');
     }
 
     if (!Curve || !signedKeyPair) {
-      const cryptoUtils = await import('@whiskeysockets/baileys/lib/Utils/crypto');
+      const cryptoUtils = await import('@whiskeysockets/baileys/lib/Utils/crypto.js');
       Curve = cryptoUtils.Curve;
       signedKeyPair = cryptoUtils.signedKeyPair;
       logger.info('📦 Loaded crypto utils');
     }
 
     if (!generateRegistrationId) {
-      const generics = await import('@whiskeysockets/baileys/lib/Utils/generics');
+      const generics = await import('@whiskeysockets/baileys/lib/Utils/generics.js');
       generateRegistrationId = generics.generateRegistrationId;
       logger.info('📦 Loaded generics utils');
     }
