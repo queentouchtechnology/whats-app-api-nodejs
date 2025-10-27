@@ -49,10 +49,10 @@
         "uuid": "^9.0.0"
     },
 
-    "overrides": {
+    "resolutions": {
     "libsignal-node": "https://github.com/queentouchtechnology/libsignal-node.git"
   },
-  
+
     "devDependencies": {
         "eslint": "^8.28.0",
         "eslint-config-prettier": "^8.5.0",
