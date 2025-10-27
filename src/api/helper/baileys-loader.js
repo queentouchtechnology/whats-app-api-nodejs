@@ -1,14 +1,20 @@
 // src/api/helper/baileys-loader.js
 const logger = require('pino')();
+
 let baileysModule = null;
 
+/**
+ * Dynamically loads the official @whiskeysockets/baileys package.
+ * Works in both CommonJS (local) and ESM (Vercel) environments.
+ */
 async function loadBaileys() {
   if (baileysModule) return baileysModule;
 
   try {
+    // Dynamically import Baileys (works with Node 18+ ESM in Vercel)
     const mod = await import('@whiskeysockets/baileys');
 
-    // Try every export pattern possible
+    // Normalize exports for both ESM and CommonJS
     const makeWASocket =
       mod.makeWASocket ||
       mod.default?.makeWASocket ||
@@ -21,16 +27,17 @@ async function loadBaileys() {
       null;
 
     if (!makeWASocket) {
-      throw new Error(
-        `Baileys module missing expected exports — found keys: ${Object.keys(mod)}`
+      logger.error(
+        `❌ Baileys module missing expected exports. Found keys: ${Object.keys(mod)}`
       );
+      throw new Error('Baileys module missing expected exports');
     }
 
     baileysModule = { makeWASocket, DisconnectReason };
-    logger.info('✅ Baileys dynamically loaded (compatible mode)');
+    logger.info('✅ Baileys (official) module successfully loaded');
     return baileysModule;
   } catch (err) {
-    logger.error({ err }, '❌ Failed to import Baileys');
+    logger.error({ err }, '❌ Failed to import official @whiskeysockets/baileys');
     throw err;
   }
 }
