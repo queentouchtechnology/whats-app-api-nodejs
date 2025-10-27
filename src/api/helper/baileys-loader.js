@@ -5,19 +5,27 @@ let baileysModule = null;
 
 /**
  * Dynamically imports the official @whiskeysockets/baileys package.
- * Handles ESM variations in Node 18+ and Vercel environments.
+ * Works in both Node 18+ (Vercel) and local CommonJS environments.
  */
 async function loadBaileys() {
   if (baileysModule) return baileysModule;
 
   try {
+    logger.info('📦 Attempting to import @whiskeysockets/baileys...');
     const mod = await import('@whiskeysockets/baileys');
 
-    // Try multiple known export shapes (covers Vercel & local)
+    // 🔍 Log structure if something goes wrong later
+    if (process.env.NODE_ENV !== 'production') {
+      logger.info('🔍 Baileys import keys:', Object.keys(mod));
+      if (mod.default) logger.info('🔍 Baileys.default keys:', Object.keys(mod.default));
+    }
+
+    // 🧩 Support multiple export structures across Node builds
     const makeWASocket =
       mod.makeWASocket ||
       mod.default?.makeWASocket ||
       mod.default?.default?.makeWASocket ||
+      mod?.default?.WASocket ||
       null;
 
     const DisconnectReason =
@@ -26,7 +34,8 @@ async function loadBaileys() {
       mod.default?.default?.DisconnectReason ||
       null;
 
-    if (!makeWASocket) {
+    // 🧠 Defensive check
+    if (typeof makeWASocket !== 'function') {
       logger.error(
         `❌ Baileys module missing expected exports. Found keys: ${Object.keys(mod)}`
       );
