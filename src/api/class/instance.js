@@ -1,10 +1,12 @@
 /* eslint-disable no-unsafe-optional-chaining */
+//src/api/class/instance.js
+
 const QRCode = require('qrcode')
 const pino = require('pino')
-const {
-    default: makeWASocket,
-    DisconnectReason,
-} = require('@whiskeysockets/baileys')
+// NOTE: do NOT require Baileys here (it's ESM). We'll import it dynamically in init().
+let makeWASocket
+let DisconnectReason
+
 const { unlinkSync } = require('fs')
 const { v4: uuidv4 } = require('uuid')
 const path = require('path')
@@ -70,19 +72,40 @@ class WhatsAppInstance {
     }
 
     async init() {
-      // logger.info(`INSTANCE: init() start for key=${this.key}`)
+        // ensure Baileys (ESM) is loaded before using it
+        if (!makeWASocket) {
+            try {
+                const baileys = await import('@whiskeysockets/baileys')
+                // baileys may export default or named exports depending on build
+                // prefer default, otherwise try commonly named export
+                makeWASocket =
+                    baileys.default?.makeWASocket ||
+                    baileys.default ||
+                    baileys.makeWASocket ||
+                    baileys
+                DisconnectReason =
+                    baileys.DisconnectReason ||
+                    baileys.default?.DisconnectReason ||
+                    baileys.default?.DisconnectReason
+                logger.info('✅ Baileys module dynamically imported')
+            } catch (err) {
+                logger.error({ err }, '❌ Failed to import @whiskeysockets/baileys')
+                throw err
+            }
+        }
+
+        // logger.info(`INSTANCE: init() start for key=${this.key}`)
         this.collection = mongoClient.db('whatsapp-api').collection(this.key)
         const { state, saveCreds } = await useMongoDBAuthState(this.collection)
-       // logger.info(`AUTH: Loaded MongoDB state for key=${this.key}`)
+        // logger.info(`AUTH: Loaded MongoDB state for key=${this.key}`)
 
-        
         this.authState = { state: state, saveCreds: saveCreds }
         this.socketConfig.auth = this.authState.state
         this.socketConfig.browser = Object.values(config.browser)
         //  logger.info(`SOCKET: Creating socket for key=${this.key}`)
         this.instance.sock = makeWASocket(this.socketConfig)
 
-       // logger.info(`SOCKET: setHandler() registering events for key=${this.key}`)
+        // logger.info(`SOCKET: setHandler() registering events for key=${this.key}`)
         this.setHandler()
 
         logger.info(`INSTANCE: init() complete for key=${this.key}`)
@@ -95,92 +118,105 @@ class WhatsAppInstance {
         sock?.ev.on('creds.update', this.authState.saveCreds)
 
         // on socket closed, opened, connecting
-sock?.ev.on('connection.update', async (update) => {
-    // full debug print
-    logger.info(`DEBUG: connection.update | key=${this.key} | data=${JSON.stringify(update, null, 2)}`)
-
-    const { connection, lastDisconnect, qr } = update
-
-    if (connection === 'connecting') {
-        logger.info(`STATE: connecting | key=${this.key}`)
-        return
-    }
-
-    // 🔹 Connection closed
-    if (connection === 'close') {
-        const reason =
-            lastDisconnect?.error?.output?.statusCode ||
-            lastDisconnect?.error?.message ||
-            'unknown'
-        logger.warn(`STATE: connection closed | reason=${reason} | key=${this.key}`)
-
-        // prevent infinite reconnect loops
-        if (
-            reason !== DisconnectReason.loggedOut &&
-            !this.instance.reconnecting
-        ) {
-            this.instance.reconnecting = true
-            logger.info(`RECONNECT: attempting reconnect | key=${this.key}`)
-            try {
-                await this.init()
-                logger.info(`RECONNECT: successful re-init | key=${this.key}`)
-            } catch (err) {
-                logger.error({ err }, `RECONNECT: failed | key=${this.key}`)
-            } finally {
-                this.instance.reconnecting = false
-            }
-        } else {
-            logger.warn(`STATE: logged out or reconnect skipped | key=${this.key}`)
-            await this.collection.drop().then(() => {
-                logger.info(`STATE: Dropped collection for key=${this.key}`)
-            })
-            this.instance.online = false
-        }
-
-        await this.SendWebhook('connection', { connection }, this.key)
-    }
-
-    // 🔹 Connection open
-    else if (connection === 'open') {
-        logger.info(`STATE: connection open | key=${this.key}`)
-        if (config.mongoose.enabled) {
-            let alreadyThere = await Chat.findOne({ key: this.key }).exec()
-            if (!alreadyThere) {
-                const saveChat = new Chat({ key: this.key })
-                await saveChat.save()
-                logger.info(`DB: created Chat doc | key=${this.key}`)
-            } else {
-                logger.info(`DB: existing Chat doc | key=${this.key}`)
-            }
-        }
-        this.instance.online = true
-        await this.SendWebhook('connection', { connection }, this.key)
-    }
-
-    // 🔹 QR code received
-    if (qr) {
-        logger.info(`🔥 QR: Received new QR for key=${this.key}`)
-        try {
-            const url = await QRCode.toDataURL(qr)
-            this.instance.qr = url
-            this.instance.qrRetry++
+        sock?.ev.on('connection.update', async (update) => {
+            // full debug print
             logger.info(
-                `✅ QR: DataURL stored | retry=${this.instance.qrRetry} | key=${this.key}`
+                `DEBUG: connection.update | key=${this.key} | data=${JSON.stringify(
+                    update,
+                    null,
+                    2
+                )}`
             )
 
-            if (this.instance.qrRetry >= config.instance.maxRetryQr) {
-                logger.warn(
-                    `⚠️ QR: Max retry reached, closing socket | key=${this.key}`
-                )
-                this.instance.sock.ws.close()
-                this.instance.sock.ev.removeAllListeners()
-                this.instance.qr = ' '
+            const { connection, lastDisconnect, qr } = update
+
+            if (connection === 'connecting') {
+                logger.info(`STATE: connecting | key=${this.key}`)
+                return
             }
-        } catch (err) {
-            logger.error({ err }, `❌ QR: Failed to convert to DataURL | key=${this.key}`)
-        }
-    }
-})
+
+            // 🔹 Connection closed
+            if (connection === 'close') {
+                const reason =
+                    lastDisconnect?.error?.output?.statusCode ||
+                    lastDisconnect?.error?.message ||
+                    'unknown'
+                logger.warn(
+                    `STATE: connection closed | reason=${reason} | key=${this.key}`
+                )
+
+                // prevent infinite reconnect loops
+                if (
+                    reason !== DisconnectReason?.loggedOut &&
+                    !this.instance.reconnecting
+                ) {
+                    this.instance.reconnecting = true
+                    logger.info(`RECONNECT: attempting reconnect | key=${this.key}`)
+                    try {
+                        await this.init()
+                        logger.info(`RECONNECT: successful re-init | key=${this.key}`)
+                    } catch (err) {
+                        logger.error({ err }, `RECONNECT: failed | key=${this.key}`)
+                    } finally {
+                        this.instance.reconnecting = false
+                    }
+                } else {
+                    logger.warn(
+                        `STATE: logged out or reconnect skipped | key=${this.key}`
+                    )
+                    await this.collection.drop().then(() => {
+                        logger.info(`STATE: Dropped collection for key=${this.key}`)
+                    })
+                    this.instance.online = false
+                }
+
+                await this.SendWebhook('connection', { connection }, this.key)
+            }
+
+            // 🔹 Connection open
+            else if (connection === 'open') {
+                logger.info(`STATE: connection open | key=${this.key}`)
+                if (config.mongoose.enabled) {
+                    let alreadyThere = await Chat.findOne({ key: this.key }).exec()
+                    if (!alreadyThere) {
+                        const saveChat = new Chat({ key: this.key })
+                        await saveChat.save()
+                        logger.info(`DB: created Chat doc | key=${this.key}`)
+                    } else {
+                        logger.info(`DB: existing Chat doc | key=${this.key}`)
+                    }
+                }
+                this.instance.online = true
+                await this.SendWebhook('connection', { connection }, this.key)
+            }
+
+            // 🔹 QR code received
+            if (qr) {
+                logger.info(`🔥 QR: Received new QR for key=${this.key}`)
+                try {
+                    const url = await QRCode.toDataURL(qr)
+                    this.instance.qr = url
+                    this.instance.qrRetry++
+                    logger.info(
+                        `✅ QR: DataURL stored | retry=${this.instance.qrRetry} | key=${this.key}`
+                    )
+
+                    if (this.instance.qrRetry >= config.instance.maxRetryQr) {
+                        logger.warn(
+                            `⚠️ QR: Max retry reached, closing socket | key=${this.key}`
+                        )
+                        this.instance.sock.ws.close()
+                        this.instance.sock.ev.removeAllListeners()
+                        this.instance.qr = ' '
+                    }
+                } catch (err) {
+                    logger.error(
+                        { err },
+                        `❌ QR: Failed to convert to DataURL | key=${this.key}`
+                    )
+                }
+            }
+        })
 
         // sending presence
         sock?.ev.on('presence.update', async (json) => {
@@ -224,9 +260,7 @@ sock?.ev.on('connection.update', async (update) => {
             //console.log('chats.update')
             //console.log(changedChat)
             changedChat.map((chat) => {
-                const index = this.instance.chats.findIndex(
-                    (pc) => pc.id === chat.id
-                )
+                const index = this.instance.chats.findIndex((pc) => pc.id === chat.id)
                 const PrevChat = this.instance.chats[index]
                 this.instance.chats[index] = {
                     ...PrevChat,
@@ -240,9 +274,7 @@ sock?.ev.on('connection.update', async (update) => {
             //console.log('chats.delete')
             //console.log(deletedChats)
             deletedChats.map((chat) => {
-                const index = this.instance.chats.findIndex(
-                    (c) => c.id === chat
-                )
+                const index = this.instance.chats.findIndex((c) => c.id === chat)
                 this.instance.chats.splice(index, 1)
             })
         })
@@ -251,8 +283,7 @@ sock?.ev.on('connection.update', async (update) => {
         sock?.ev.on('messages.upsert', async (m) => {
             //console.log('messages.upsert')
             //console.log(m)
-            if (m.type === 'prepend')
-                this.instance.messages.unshift(...m.messages)
+            if (m.type === 'prepend') this.instance.messages.unshift(...m.messages)
             if (m.type !== 'notify') return
 
             // https://adiwajshing.github.io/Baileys/#reading-messages
@@ -273,13 +304,7 @@ sock?.ev.on('connection.update', async (update) => {
                 if (!msg.message) return
 
                 const messageType = Object.keys(msg.message)[0]
-                if (
-                    [
-                        'protocolMessage',
-                        'senderKeyDistributionMessage',
-                    ].includes(messageType)
-                )
-                    return
+                if (['protocolMessage', 'senderKeyDistributionMessage'].includes(messageType)) return
 
                 const webhookData = {
                     key: this.key,
@@ -314,11 +339,9 @@ sock?.ev.on('connection.update', async (update) => {
                             break
                     }
                 }
-                if (
-                    ['all', 'messages', 'messages.upsert'].some((e) =>
-                        config.webhookAllowedEvents.includes(e)
-                    )
-                )
+                if (['all', 'messages', 'messages.upsert'].some((e) =>
+                    config.webhookAllowedEvents.includes(e)
+                ))
                     await this.SendWebhook('message', webhookData, this.key)
             })
         })
@@ -350,9 +373,7 @@ sock?.ev.on('connection.update', async (update) => {
                             this.key
                         )
                 } else if (data.content.find((e) => e.tag === 'terminate')) {
-                    const content = data.content.find(
-                        (e) => e.tag === 'terminate'
-                    )
+                    const content = data.content.find((e) => e.tag === 'terminate')
 
                     if (
                         ['all', 'call', 'call:terminate'].some((e) =>
@@ -464,131 +485,102 @@ sock?.ev.on('connection.update', async (update) => {
 
     async sendTextMessage(to, message) {
         await this.verifyId(this.getWhatsAppId(to))
-        const data = await this.instance.sock?.sendMessage(
-            this.getWhatsAppId(to),
-            { text: message }
-        )
+        const data = await this.instance.sock?.sendMessage(this.getWhatsAppId(to), { text: message })
         return data
     }
 
     async sendMediaFile(to, file, type, caption = '', filename) {
         await this.verifyId(this.getWhatsAppId(to))
-        const data = await this.instance.sock?.sendMessage(
-            this.getWhatsAppId(to),
-            {
-                mimetype: file.mimetype,
-                [type]: file.buffer,
-                caption: caption,
-                ptt: type === 'audio' ? true : false,
-                fileName: filename ? filename : file.originalname,
-            }
-        )
+        const data = await this.instance.sock?.sendMessage(this.getWhatsAppId(to), {
+            mimetype: file.mimetype,
+            [type]: file.buffer,
+            caption: caption,
+            ptt: type === 'audio' ? true : false,
+            fileName: filename ? filename : file.originalname,
+        })
         return data
     }
 
     async sendUrlMediaFile(to, url, type, mimeType, caption = '') {
         await this.verifyId(this.getWhatsAppId(to))
 
-        const data = await this.instance.sock?.sendMessage(
-            this.getWhatsAppId(to),
-            {
-                [type]: {
-                    url: url,
-                },
-                caption: caption,
-                mimetype: mimeType,
-            }
-        )
+        const data = await this.instance.sock?.sendMessage(this.getWhatsAppId(to), {
+            [type]: {
+                url: url,
+            },
+            caption: caption,
+            mimetype: mimeType,
+        })
         return data
     }
 
     async DownloadProfile(of) {
         await this.verifyId(this.getWhatsAppId(of))
-        const ppUrl = await this.instance.sock?.profilePictureUrl(
-            this.getWhatsAppId(of),
-            'image'
-        )
+        const ppUrl = await this.instance.sock?.profilePictureUrl(this.getWhatsAppId(of), 'image')
         return ppUrl
     }
 
     async getUserStatus(of) {
         await this.verifyId(this.getWhatsAppId(of))
-        const status = await this.instance.sock?.fetchStatus(
-            this.getWhatsAppId(of)
-        )
+        const status = await this.instance.sock?.fetchStatus(this.getWhatsAppId(of))
         return status
     }
 
     async blockUnblock(to, data) {
         await this.verifyId(this.getWhatsAppId(to))
-        const status = await this.instance.sock?.updateBlockStatus(
-            this.getWhatsAppId(to),
-            data
-        )
+        const status = await this.instance.sock?.updateBlockStatus(this.getWhatsAppId(to), data)
         return status
     }
 
     async sendButtonMessage(to, data) {
         await this.verifyId(this.getWhatsAppId(to))
-        const result = await this.instance.sock?.sendMessage(
-            this.getWhatsAppId(to),
-            {
-                templateButtons: processButton(data.buttons),
-                text: data.text ?? '',
-                footer: data.footerText ?? '',
-                viewOnce: true,
-            }
-        )
+        const result = await this.instance.sock?.sendMessage(this.getWhatsAppId(to), {
+            templateButtons: processButton(data.buttons),
+            text: data.text ?? '',
+            footer: data.footerText ?? '',
+            viewOnce: true,
+        })
         return result
     }
 
     async sendContactMessage(to, data) {
         await this.verifyId(this.getWhatsAppId(to))
         const vcard = generateVC(data)
-        const result = await this.instance.sock?.sendMessage(
-            await this.getWhatsAppId(to),
-            {
-                contacts: {
-                    displayName: data.fullName,
-                    contacts: [{ displayName: data.fullName, vcard }],
-                },
-            }
-        )
+        const result = await this.instance.sock?.sendMessage(await this.getWhatsAppId(to), {
+            contacts: {
+                displayName: data.fullName,
+                contacts: [{ displayName: data.fullName, vcard }],
+            },
+        })
         return result
     }
 
     async sendListMessage(to, data) {
         await this.verifyId(this.getWhatsAppId(to))
-        const result = await this.instance.sock?.sendMessage(
-            this.getWhatsAppId(to),
-            {
-                text: data.text,
-                sections: data.sections,
-                buttonText: data.buttonText,
-                footer: data.description,
-                title: data.title,
-                viewOnce: true,
-            }
-        )
+        const result = await this.instance.sock?.sendMessage(this.getWhatsAppId(to), {
+            text: data.text,
+            sections: data.sections,
+            buttonText: data.buttonText,
+            footer: data.description,
+            title: data.title,
+            viewOnce: true,
+        })
         return result
     }
 
     async sendMediaButtonMessage(to, data) {
         await this.verifyId(this.getWhatsAppId(to))
 
-        const result = await this.instance.sock?.sendMessage(
-            this.getWhatsAppId(to),
-            {
-                [data.mediaType]: {
-                    url: data.image,
-                },
-                footer: data.footerText ?? '',
-                caption: data.text,
-                templateButtons: processButton(data.buttons),
-                mimetype: data.mimeType,
-                viewOnce: true,
-            }
-        )
+        const result = await this.instance.sock?.sendMessage(this.getWhatsAppId(to), {
+            [data.mediaType]: {
+                url: data.image,
+            },
+            footer: data.footerText ?? '',
+            caption: data.text,
+            templateButtons: processButton(data.buttons),
+            mimetype: data.mimeType,
+            viewOnce: true,
+        })
         return result
     }
 
@@ -603,10 +595,7 @@ sock?.ev.on('connection.update', async (update) => {
     async updateProfilePicture(id, url) {
         try {
             const img = await axios.get(url, { responseType: 'arraybuffer' })
-            const res = await this.instance.sock?.updateProfilePicture(
-                id,
-                img.data
-            )
+            const res = await this.instance.sock?.updateProfilePicture(id, img.data)
             return res
         } catch (e) {
             //console.log(e)
@@ -623,9 +612,7 @@ sock?.ev.on('connection.update', async (update) => {
             let Chats = await this.getChat()
             const group = Chats.find((c) => c.id === this.getWhatsAppId(id))
             if (!group)
-                throw new Error(
-                    'unable to get group, check if the group exists'
-                )
+                throw new Error('unable to get group, check if the group exists')
             return group
         } catch (e) {
             logger.error(e)
@@ -647,10 +634,7 @@ sock?.ev.on('connection.update', async (update) => {
                     let group = Chats.find((c) => c.id === value.id)
                     if (group) {
                         let participants = []
-                        for (const [
-                            key_participant,
-                            participant,
-                        ] of Object.entries(value.participants)) {
+                        for (const [key_participant, participant] of Object.entries(value.participants)) {
                             participants.push(participant)
                         }
                         group.participant = participants
@@ -673,10 +657,7 @@ sock?.ev.on('connection.update', async (update) => {
 
     async createNewGroup(name, users) {
         try {
-            const group = await this.instance.sock?.groupCreate(
-                name,
-                users.map(this.getWhatsAppId)
-            )
+            const group = await this.instance.sock?.groupCreate(name, users.map(this.getWhatsAppId))
             return group
         } catch (e) {
             logger.error(e)
@@ -686,48 +667,36 @@ sock?.ev.on('connection.update', async (update) => {
 
     async addNewParticipant(id, users) {
         try {
-            const res = await this.instance.sock?.groupAdd(
-                this.getWhatsAppId(id),
-                this.parseParticipants(users)
-            )
+            const res = await this.instance.sock?.groupAdd(this.getWhatsAppId(id), this.parseParticipants(users))
             return res
         } catch {
             return {
                 error: true,
-                message:
-                    'Unable to add participant, you must be an admin in this group',
+                message: 'Unable to add participant, you must be an admin in this group',
             }
         }
     }
 
     async makeAdmin(id, users) {
         try {
-            const res = await this.instance.sock?.groupMakeAdmin(
-                this.getWhatsAppId(id),
-                this.parseParticipants(users)
-            )
+            const res = await this.instance.sock?.groupMakeAdmin(this.getWhatsAppId(id), this.parseParticipants(users))
             return res
         } catch {
             return {
                 error: true,
-                message:
-                    'unable to promote some participants, check if you are admin in group or participants exists',
+                message: 'unable to promote some participants, check if you are admin in group or participants exists',
             }
         }
     }
 
     async demoteAdmin(id, users) {
         try {
-            const res = await this.instance.sock?.groupDemoteAdmin(
-                this.getWhatsAppId(id),
-                this.parseParticipants(users)
-            )
+            const res = await this.instance.sock?.groupDemoteAdmin(this.getWhatsAppId(id), this.parseParticipants(users))
             return res
         } catch {
             return {
                 error: true,
-                message:
-                    'unable to demote some participants, check if you are admin in group or participants exists',
+                message: 'unable to demote some participants, check if you are admin in group or participants exists',
             }
         }
     }
@@ -762,10 +731,7 @@ sock?.ev.on('connection.update', async (update) => {
         try {
             let Chats = await this.getChat()
             const group = Chats.find((c) => c.id === id)
-            if (!group)
-                throw new Error(
-                    'unable to get invite code, check if the group exists'
-                )
+            if (!group) throw new Error('unable to get invite code, check if the group exists')
             return await this.instance.sock?.groupInviteCode(id)
         } catch (e) {
             logger.error(e)
@@ -938,8 +904,7 @@ sock?.ev.on('connection.update', async (update) => {
             //console.log(e)
             return {
                 error: true,
-                message:
-                    'unable to ' + action + ' check if you are admin in group',
+                message: 'unable to ' + action + ' check if you are admin in group',
             }
         }
     }
@@ -1009,10 +974,7 @@ sock?.ev.on('connection.update', async (update) => {
                     key: key,
                 },
             }
-            const res = await this.instance.sock?.sendMessage(
-                this.getWhatsAppId(id),
-                reactionMessage
-            )
+            const res = await this.instance.sock?.sendMessage(this.getWhatsAppId(id), reactionMessage)
             return res
         } catch (e) {
             logger.error('Error react message failed')
