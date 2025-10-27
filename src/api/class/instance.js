@@ -70,13 +70,22 @@ class WhatsAppInstance {
     }
 
     async init() {
+      // logger.info(`INSTANCE: init() start for key=${this.key}`)
         this.collection = mongoClient.db('whatsapp-api').collection(this.key)
         const { state, saveCreds } = await useMongoDBAuthState(this.collection)
+       // logger.info(`AUTH: Loaded MongoDB state for key=${this.key}`)
+
+        
         this.authState = { state: state, saveCreds: saveCreds }
         this.socketConfig.auth = this.authState.state
         this.socketConfig.browser = Object.values(config.browser)
+        //  logger.info(`SOCKET: Creating socket for key=${this.key}`)
         this.instance.sock = makeWASocket(this.socketConfig)
+
+       // logger.info(`SOCKET: setHandler() registering events for key=${this.key}`)
         this.setHandler()
+
+        logger.info(`INSTANCE: init() complete for key=${this.key}`)
         return this
     }
 
@@ -86,83 +95,92 @@ class WhatsAppInstance {
         sock?.ev.on('creds.update', this.authState.saveCreds)
 
         // on socket closed, opened, connecting
-        sock?.ev.on('connection.update', async (update) => {
-            const { connection, lastDisconnect, qr } = update
+sock?.ev.on('connection.update', async (update) => {
+    // full debug print
+    logger.info(`DEBUG: connection.update | key=${this.key} | data=${JSON.stringify(update, null, 2)}`)
 
-            if (connection === 'connecting') return
+    const { connection, lastDisconnect, qr } = update
 
-            if (connection === 'close') {
-                // reconnect if not logged out
-                if (
-                    lastDisconnect?.error?.output?.statusCode !==
-                    DisconnectReason.loggedOut
-                ) {
-                    await this.init()
-                } else {
-                    await this.collection.drop().then((r) => {
-                        logger.info('STATE: Droped collection')
-                    })
-                    this.instance.online = false
-                }
+    if (connection === 'connecting') {
+        logger.info(`STATE: connecting | key=${this.key}`)
+        return
+    }
 
-                if (
-                    [
-                        'all',
-                        'connection',
-                        'connection.update',
-                        'connection:close',
-                    ].some((e) => config.webhookAllowedEvents.includes(e))
-                )
-                    await this.SendWebhook(
-                        'connection',
-                        {
-                            connection: connection,
-                        },
-                        this.key
-                    )
-            } else if (connection === 'open') {
-                if (config.mongoose.enabled) {
-                    let alreadyThere = await Chat.findOne({
-                        key: this.key,
-                    }).exec()
-                    if (!alreadyThere) {
-                        const saveChat = new Chat({ key: this.key })
-                        await saveChat.save()
-                    }
-                }
-                this.instance.online = true
-                if (
-                    [
-                        'all',
-                        'connection',
-                        'connection.update',
-                        'connection:open',
-                    ].some((e) => config.webhookAllowedEvents.includes(e))
-                )
-                    await this.SendWebhook(
-                        'connection',
-                        {
-                            connection: connection,
-                        },
-                        this.key
-                    )
+    // 🔹 Connection closed
+    if (connection === 'close') {
+        const reason =
+            lastDisconnect?.error?.output?.statusCode ||
+            lastDisconnect?.error?.message ||
+            'unknown'
+        logger.warn(`STATE: connection closed | reason=${reason} | key=${this.key}`)
+
+        // prevent infinite reconnect loops
+        if (
+            reason !== DisconnectReason.loggedOut &&
+            !this.instance.reconnecting
+        ) {
+            this.instance.reconnecting = true
+            logger.info(`RECONNECT: attempting reconnect | key=${this.key}`)
+            try {
+                await this.init()
+                logger.info(`RECONNECT: successful re-init | key=${this.key}`)
+            } catch (err) {
+                logger.error({ err }, `RECONNECT: failed | key=${this.key}`)
+            } finally {
+                this.instance.reconnecting = false
             }
+        } else {
+            logger.warn(`STATE: logged out or reconnect skipped | key=${this.key}`)
+            await this.collection.drop().then(() => {
+                logger.info(`STATE: Dropped collection for key=${this.key}`)
+            })
+            this.instance.online = false
+        }
 
-            if (qr) {
-                QRCode.toDataURL(qr).then((url) => {
-                    this.instance.qr = url
-                    this.instance.qrRetry++
-                    if (this.instance.qrRetry >= config.instance.maxRetryQr) {
-                        // close WebSocket connection
-                        this.instance.sock.ws.close()
-                        // remove all events
-                        this.instance.sock.ev.removeAllListeners()
-                        this.instance.qr = ' '
-                        logger.info('socket connection terminated')
-                    }
-                })
+        await this.SendWebhook('connection', { connection }, this.key)
+    }
+
+    // 🔹 Connection open
+    else if (connection === 'open') {
+        logger.info(`STATE: connection open | key=${this.key}`)
+        if (config.mongoose.enabled) {
+            let alreadyThere = await Chat.findOne({ key: this.key }).exec()
+            if (!alreadyThere) {
+                const saveChat = new Chat({ key: this.key })
+                await saveChat.save()
+                logger.info(`DB: created Chat doc | key=${this.key}`)
+            } else {
+                logger.info(`DB: existing Chat doc | key=${this.key}`)
             }
-        })
+        }
+        this.instance.online = true
+        await this.SendWebhook('connection', { connection }, this.key)
+    }
+
+    // 🔹 QR code received
+    if (qr) {
+        logger.info(`🔥 QR: Received new QR for key=${this.key}`)
+        try {
+            const url = await QRCode.toDataURL(qr)
+            this.instance.qr = url
+            this.instance.qrRetry++
+            logger.info(
+                `✅ QR: DataURL stored | retry=${this.instance.qrRetry} | key=${this.key}`
+            )
+
+            if (this.instance.qrRetry >= config.instance.maxRetryQr) {
+                logger.warn(
+                    `⚠️ QR: Max retry reached, closing socket | key=${this.key}`
+                )
+                this.instance.sock.ws.close()
+                this.instance.sock.ev.removeAllListeners()
+                this.instance.qr = ' '
+            }
+        } catch (err) {
+            logger.error({ err }, `❌ QR: Failed to convert to DataURL | key=${this.key}`)
+        }
+    }
+})
 
         // sending presence
         sock?.ev.on('presence.update', async (json) => {
