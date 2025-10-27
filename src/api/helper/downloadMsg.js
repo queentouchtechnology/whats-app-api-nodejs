@@ -1,4 +1,4 @@
-const { downloadContentFromMessage } = require('@whiskeysockets/baileys')
+const { downloadContentFromMessage } = require('../helper/baileys-loader')
 
 module.exports = async function downloadMessage(msg, msgType) {
     let buffer = Buffer.from([])
