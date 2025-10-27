@@ -7,7 +7,7 @@ const pino = require('pino')
 
 // Baileys dynamic loader (instead of direct require)
 const { loadBaileys } = require('../helper/baileys-loader');
-
+const connectToCluster = require('../helper/connectMongoClient');
 
 let makeWASocket
 let DisconnectReason
@@ -77,53 +77,47 @@ class WhatsAppInstance {
     }
 
     async init() {
-        // ensure Baileys (ESM) is loaded before using it
-        if (!makeWASocket) {
-            try {
-               const baileys = await loadBaileys();      
-                // baileys may export default or named exports depending on build
-                // prefer default, otherwise try commonly named export
-                makeWASocket =
-                    baileys.default?.makeWASocket ||
-                    baileys.default ||
-                    baileys.makeWASocket ||
-                    baileys
-                DisconnectReason =
-                    baileys.DisconnectReason ||
-                    baileys.default?.DisconnectReason ||
-                    baileys.default?.DisconnectReason
-                logger.info('✅ Baileys module loaded via helper')
-            } catch (err) {
-                logger.error({ err }, '❌ Failed to import @whiskeysockets/baileys')
-                throw err
-            }
-        }
-
-        // logger.info(`INSTANCE: init() start for key=${this.key}`)
-       // this.collection = mongoClient.db('whatsapp-api').collection(this.key)
-
-       const connectToCluster = require('../helper/connectMongoClient');
-const client = global.mongoClient || (global.mongoClient = await connectToCluster(process.env.MONGO_URL));
-this.collection = client.db('whatsapp-api').collection(this.key);
-
-
-
-        const { state, saveCreds } = await useMongoDBAuthState(this.collection)
-        // logger.info(`AUTH: Loaded MongoDB state for key=${this.key}`)
-
-        this.authState = { state: state, saveCreds: saveCreds }
-        this.socketConfig.auth = this.authState.state
-        this.socketConfig.browser = Object.values(config.browser)
-        //  logger.info(`SOCKET: Creating socket for key=${this.key}`)
-        this.instance.sock = makeWASocket(this.socketConfig)
-
-        // logger.info(`SOCKET: setHandler() registering events for key=${this.key}`)
-        this.setHandler()
-
-        logger.info(`INSTANCE: init() complete for key=${this.key}`)
-        return this
+  try {
+    // ✅ 1. Dynamically load Baileys ESM module (works in Vercel)
+    if (!makeWASocket) {
+      const { makeWASocket: makeWA, DisconnectReason: reason } = await loadBaileys();
+      makeWASocket = makeWA;
+      DisconnectReason = reason;
+      logger.info('✅ Baileys module loaded via helper');
     }
 
+    // ✅ 2. Ensure MongoDB connection exists (reuses global connection)
+    const client =
+      global.mongoClient ||
+      (global.mongoClient = await connectToCluster(process.env.MONGO_URL));
+
+    if (!client) {
+      throw new Error('MongoDB connection failed or returned null client');
+    }
+
+    this.collection = client.db('whatsapp-api').collection(this.key);
+
+    // ✅ 3. Load auth state from Mongo
+    const { state, saveCreds } = await useMongoDBAuthState(this.collection);
+    this.authState = { state, saveCreds };
+
+    // ✅ 4. Prepare socket configuration
+    this.socketConfig.auth = state;
+    this.socketConfig.browser = Object.values(config.browser);
+
+    // ✅ 5. Initialize WhatsApp socket
+    this.instance.sock = makeWASocket(this.socketConfig);
+
+    // ✅ 6. Register handlers
+    this.setHandler();
+
+    logger.info(`INSTANCE: init() complete for key=${this.key}`);
+    return this;
+  } catch (err) {
+    logger.error({ err }, `❌ INSTANCE: Initialization failed for key=${this.key}`);
+    throw new Error('Initialization failed: ' + err.message);
+  }
+}
     setHandler() {
         const sock = this.instance.sock
         // on credentials update save state
