@@ -1,3 +1,6 @@
+
+const logger = require('pino')({ level: process.env.LOG_LEVEL || 'info' })
+
 exports.Text = async (req, res) => {
     const data = await WhatsAppInstances[req.query.key].sendTextMessage(
         req.body.id,
@@ -74,7 +77,8 @@ exports.Button = async (req, res) => {
       const data = await instance.sendButtonMessage(req.body.id, req.body.btndata);
       return res.status(201).json({ error: false, data });
     } catch (err) {
-      logger.error({ err }, `BUTTON: Failed for key=${key}`);
+      logger.info({ err }, `BUTTON: Failed for key=${key}`);
+     
       return res.status(400).json({ error: true, message: err.message });
     }
   }
