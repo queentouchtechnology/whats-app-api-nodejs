@@ -49,8 +49,9 @@
         "uuid": "^9.0.0"
     },
     "resolutions": {
-        "libsignal-node": "https://github.com/queentouchtechnology/libsignal-node.git"
+        "libsignal-node": "git+https://github.com/whiskeysockets/libsignal-node.git#main"
       },
+      
     "devDependencies": {
         "eslint": "^8.28.0",
         "eslint-config-prettier": "^8.5.0",
