@@ -528,31 +528,21 @@ sock?.ev.on('connection.update', async (update) => {
         return status
     }
 
-    // async sendButtonMessage(to, data) {
-    //     await this.verifyId(this.getWhatsAppId(to))
-    //     const result = await this.instance.sock?.sendMessage(
-    //         this.getWhatsAppId(to),
-    //         {
-    //             templateButtons: processButton(data.buttons),
-    //             text: data.text ?? '',
-    //             footer: data.footerText ?? '',
-    //             viewOnce: true,
-    //         }
-    //     )
-    //     return result
-    // }
-
     async sendButtonMessage(to, data) {
-        await this.verifyId(this.getWhatsAppId(to));
-        const result = await this.instance.sock?.sendMessage(this.getWhatsAppId(to), {
-          text: data.text ?? "",
-          footer: data.footerText ?? "",
-          buttons: processButton(data.buttons),
-          headerType: 1
-        });
-        return result;
-      }
-      
+        await this.verifyId(this.getWhatsAppId(to))
+        const result = await this.instance.sock?.sendMessage(
+            this.getWhatsAppId(to),
+            {
+                templateButtons: processButton(data.buttons),
+                text: data.text ?? '',
+                footer: data.footerText ?? '',
+                viewOnce: true,
+            }
+        )
+        return result
+    }
+
+   
 
     async sendContactMessage(to, data) {
         await this.verifyId(this.getWhatsAppId(to))
