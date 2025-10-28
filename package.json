@@ -49,7 +49,7 @@
         "uuid": "^9.0.0"
     },
     "resolutions": {
-        "libsignal-node": "git+https://github.com/whiskeysockets/libsignal-node.git#main"
+        "libsignal-node": "git+https://github.com/queentouchtechnology/libsignal-node.git#master"
       },
       
     "devDependencies": {
