@@ -1,51 +1,121 @@
+const { WhatsAppInstance } = require('../class/instance');
+const connectToCluster = require('../helper/connectMongoClient');
+const logger = require('pino')({ level: process.env.LOG_LEVEL || 'info' });
+
+// 🔧 Helper: Restore WhatsApp instance from MongoDB if missing (Vercel-safe)
+async function getOrRestoreInstance(key) {
+    if (WhatsAppInstances[key]) return WhatsAppInstances[key];
+
+    const client =
+        global.mongoClient ||
+        (global.mongoClient = await connectToCluster(process.env.MONGO_URL));
+
+    const db = client.db('whatsapp-api');
+    const collections = await db.listCollections().toArray();
+    const exists = collections.find((c) => c.name === key);
+
+    if (!exists) throw new Error('invalid key supplied');
+
+    logger.warn(`🧠 Auto-restoring WhatsApp instance for key=${key}`);
+    const instance = new WhatsAppInstance(key, false, null);
+    await instance.init();
+    WhatsAppInstances[key] = instance;
+    return instance;
+}
+
+// ----------------------------- CHECK IF NUMBER IS ON WHATSAPP -----------------------------
 exports.onWhatsapp = async (req, res) => {
-    // eslint-disable-next-line no-unsafe-optional-chaining
-    const data = await WhatsAppInstances[req.query.key]?.verifyId(
-        WhatsAppInstances[req.query.key]?.getWhatsAppId(req.query.id)
-    )
-    return res.status(201).json({ error: false, data: data })
-}
+    const key = req.query.key;
+    const id = req.query.id;
 
+    try {
+        const instance = await getOrRestoreInstance(key);
+        const data = await instance.verifyId(instance.getWhatsAppId(id));
+        return res.status(201).json({ error: false, data });
+    } catch (err) {
+        logger.error({ err }, `onWhatsapp: Failed for key=${key}`);
+        return res.status(400).json({ error: true, message: err.message });
+    }
+};
+
+// ----------------------------- DOWNLOAD PROFILE PICTURE -----------------------------
 exports.downProfile = async (req, res) => {
-    const data = await WhatsAppInstances[req.query.key]?.DownloadProfile(
-        req.query.id
-    )
-    return res.status(201).json({ error: false, data: data })
-}
+    const key = req.query.key;
+    const id = req.query.id;
 
+    try {
+        const instance = await getOrRestoreInstance(key);
+        const data = await instance.DownloadProfile(id);
+        return res.status(201).json({ error: false, data });
+    } catch (err) {
+        logger.error({ err }, `downProfile: Failed for key=${key}`);
+        return res.status(400).json({ error: true, message: err.message });
+    }
+};
+
+// ----------------------------- GET USER STATUS -----------------------------
 exports.getStatus = async (req, res) => {
-    const data = await WhatsAppInstances[req.query.key]?.getUserStatus(
-        req.query.id
-    )
-    return res.status(201).json({ error: false, data: data })
-}
+    const key = req.query.key;
+    const id = req.query.id;
 
+    try {
+        const instance = await getOrRestoreInstance(key);
+        const data = await instance.getUserStatus(id);
+        return res.status(201).json({ error: false, data });
+    } catch (err) {
+        logger.error({ err }, `getStatus: Failed for key=${key}`);
+        return res.status(400).json({ error: true, message: err.message });
+    }
+};
+
+// ----------------------------- BLOCK OR UNBLOCK USER -----------------------------
 exports.blockUser = async (req, res) => {
-    const data = await WhatsAppInstances[req.query.key]?.blockUnblock(
-        req.query.id,
-        req.query.block_status
-    )
-    if (req.query.block_status == 'block') {
-        return res
-            .status(201)
-            .json({ error: false, message: 'Contact Blocked' })
-    } else
-        return res
-            .status(201)
-            .json({ error: false, message: 'Contact Unblocked' })
-}
+    const key = req.query.key;
+    const id = req.query.id;
+    const blockStatus = req.query.block_status;
 
+    try {
+        const instance = await getOrRestoreInstance(key);
+        await instance.blockUnblock(id, blockStatus);
+
+        const message =
+            blockStatus === 'block'
+                ? 'Contact Blocked'
+                : 'Contact Unblocked';
+
+        return res.status(201).json({ error: false, message });
+    } catch (err) {
+        logger.error({ err }, `blockUser: Failed for key=${key}`);
+        return res.status(400).json({ error: true, message: err.message });
+    }
+};
+
+// ----------------------------- UPDATE PROFILE PICTURE -----------------------------
 exports.updateProfilePicture = async (req, res) => {
-    const data = await WhatsAppInstances[req.query.key].updateProfilePicture(
-        req.body.id,
-        req.body.url
-    )
-    return res.status(201).json({ error: false, data: data })
-}
+    const key = req.query.key;
+    const { id, url } = req.body;
 
+    try {
+        const instance = await getOrRestoreInstance(key);
+        const data = await instance.updateProfilePicture(id, url);
+        return res.status(201).json({ error: false, data });
+    } catch (err) {
+        logger.error({ err }, `updateProfilePicture: Failed for key=${key}`);
+        return res.status(400).json({ error: true, message: err.message });
+    }
+};
+
+// ----------------------------- GET USER OR GROUP BY ID -----------------------------
 exports.getUserOrGroupById = async (req, res) => {
-    const data = await WhatsAppInstances[req.query.key].getUserOrGroupById(
-        req.query.id
-    )
-    return res.status(201).json({ error: false, data: data })
-}
+    const key = req.query.key;
+    const id = req.query.id;
+
+    try {
+        const instance = await getOrRestoreInstance(key);
+        const data = await instance.getUserOrGroupById(id);
+        return res.status(201).json({ error: false, data });
+    } catch (err) {
+        logger.error({ err }, `getUserOrGroupById: Failed for key=${key}`);
+        return res.status(400).json({ error: true, message: err.message });
+    }
+};
