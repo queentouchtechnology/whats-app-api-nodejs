@@ -1,0 +1,45 @@
+# ==================================
+# SECURITY CONFIGURATION
+# ==================================
+TOKEN=0123456789
+PROTECT_ROUTES=false
+
+# ==================================
+# APPLICATION CONFIGURATION
+# ==================================
+#PORT=3333
+RESTORE_SESSIONS_ON_START_UP=false
+APP_URL=https://whats-app-api-nodejs-production.up.railway.app/
+LOG_LEVEL=silent
+
+# ==================================
+# BROWSER CONFIGURATION
+# ==================================
+CLIENT_PLATFORM='Whatsapp MD'
+CLIENT_BROWSER='Chrome'
+CLIENT_VERSION='4.0.0'
+
+# ==================================
+# INSTANCE CONFIGURATION
+# ==================================
+INSTANCE_MAX_RETRY_QR=2
+
+# ==================================
+# DATABASE CONFIGURATION
+# ==================================
+MONGODB_ENABLED=false
+MONGODB_URL=mongodb+srv://queentouchtech_db_user:OjiFI9sLNT05fWxS@whatsapp-api.igqb27o.mongodb.net/whatsapp-api?retryWrites=true&w=majority&tls=true&appName=whatsapp-api
+
+
+# ==================================
+# WEBHOOK CONFIGURATION
+# ==================================
+WEBHOOK_ENABLED=false
+WEBHOOK_URL=https://webhook.site/d0122a66-18a3-432d-b63f-4772b190dd72
+WEBHOOK_BASE64=false
+WEBHOOK_ALLOWED_EVENTS=
+
+# ==================================
+# MESSAGE CONFIGURATION
+# ==================================
+MARK_MESSAGES_READ=false

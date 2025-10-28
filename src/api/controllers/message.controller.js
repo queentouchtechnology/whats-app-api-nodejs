@@ -57,14 +57,29 @@ exports.Mediaurl = async (req, res) => {
     return res.status(201).json({ error: false, data: data })
 }
 
+// exports.Button = async (req, res) => {
+//     // console.log(res.body)
+//     const data = await WhatsAppInstances[req.query.key].sendButtonMessage(
+//         req.body.id,
+//         req.body.btndata
+//     )
+//     return res.status(201).json({ error: false, data: data })
+// }
+
+
 exports.Button = async (req, res) => {
-    // console.log(res.body)
-    const data = await WhatsAppInstances[req.query.key].sendButtonMessage(
-        req.body.id,
-        req.body.btndata
-    )
-    return res.status(201).json({ error: false, data: data })
-}
+    const key = req.query.key;
+    try {
+      const instance = await getOrRestoreInstance(key);
+      const data = await instance.sendButtonMessage(req.body.id, req.body.btndata);
+      return res.status(201).json({ error: false, data });
+    } catch (err) {
+      logger.error({ err }, `BUTTON: Failed for key=${key}`);
+      return res.status(400).json({ error: true, message: err.message });
+    }
+  }
+
+  
 
 exports.Contact = async (req, res) => {
     const data = await WhatsAppInstances[req.query.key].sendContactMessage(
