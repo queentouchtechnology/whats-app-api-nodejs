@@ -198,12 +198,12 @@ class WhatsAppInstance {
 
             // 🔹 QR code received
 
-            if (qr) {
-    logger.info(`🔥 QR: Received new QR for key=${this.key}`)
+           if (qr) {
+    logger.info(`🔥 QR: Received new QR for key=${this.key}`);
     try {
-        const url = await QRCode.toDataURL(qr)
-        this.instance.qr = url
-        this.instance.qrRetry++
+        const url = await QRCode.toDataURL(qr);
+        this.instance.qr = url;
+        this.instance.qrRetry++;
 
         // ✅ Save QR persistently in MongoDB
         await this.collection.updateOne(
@@ -213,23 +213,24 @@ class WhatsAppInstance {
                     qr: url,
                     updatedAt: new Date(),
                     retry: this.instance.qrRetry
-                },
+                }
             },
-            { upsert: true }
-        )
+            { upsert: true } // ✅ No trailing comma here!
+        );
 
-        logger.info(`✅ QR: Stored in MongoDB | retry=${this.instance.qrRetry} | key=${this.key}`)
+        logger.info(`✅ QR: Stored in MongoDB | retry=${this.instance.qrRetry} | key=${this.key}`);
 
         if (this.instance.qrRetry >= config.instance.maxRetryQr) {
-            logger.warn(`⚠️ QR: Max retry reached, closing socket | key=${this.key}`)
-            this.instance.sock.ws.close()
-            this.instance.sock.ev.removeAllListeners()
-            this.instance.qr = ' '
+            logger.warn(`⚠️ QR: Max retry reached, closing socket | key=${this.key}`);
+            this.instance.sock.ws.close();
+            this.instance.sock.ev.removeAllListeners();
+            this.instance.qr = ' ';
         }
     } catch (err) {
-        logger.error({ err }, `❌ QR: Failed to convert/store QR | key=${this.key}`)
+        logger.error({ err }, `❌ QR: Failed to convert/store QR | key=${this.key}`);
     }
 }
+
 
 
 
